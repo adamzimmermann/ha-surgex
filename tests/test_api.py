@@ -75,9 +75,18 @@ async def test_current_status_returns_payload(client, device, status_1_01):
 
 
 async def test_current_status_is_authenticated(client, device, status_1_01):
+    """The credentials must arrive, correctly encoded.
+
+    Asserting the exact value rather than a `Basic ` prefix: the header is
+    built by hand now, and a botched one would still look plausible while
+    carrying the wrong credentials. That failure mode is invisible against a
+    fake device, which never checks them -- but on real hardware it degrades
+    into the malformed-401 path and reads as a network outage.
+    """
     device.route("currentStatus", json_response(status_1_01))
     await client.current_status()
-    assert device.requests[0].headers["authorization"].startswith("Basic ")
+    # base64("admin:secret"), matching the credentials the client fixture uses.
+    assert device.requests[0].headers["authorization"] == "Basic YWRtaW46c2VjcmV0"
 
 
 async def test_401_raises_auth_error(client, device):

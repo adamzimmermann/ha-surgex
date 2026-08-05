@@ -49,14 +49,14 @@ async def try_reset_energy(label: str, coro) -> None:
 
 
 async def raw_command(
-    session: aiohttp.ClientSession, base_url: str, auth: aiohttp.BasicAuth, path: str
+    session: aiohttp.ClientSession, base_url: str, headers: dict[str, str], path: str
 ) -> None:
     """POST a control command exactly the way SurgexClient does, without
     going through the client. Needed to probe the unscoped ResetEnergyUsage
     path, which the client's public API has no method for.
     """
     url = f"{base_url}/api/v1/{path}"
-    async with session.post(url, json=[], auth=auth, timeout=TIMEOUT) as response:
+    async with session.post(url, json=[], headers=headers, timeout=TIMEOUT) as response:
         if response.status >= 400:
             raise SurgexApiError(f"POST {path} returned HTTP {response.status}")
         result = await response.json(content_type=None)
@@ -65,10 +65,10 @@ async def raw_command(
 
 
 async def get_json(
-    session: aiohttp.ClientSession, base_url: str, auth: aiohttp.BasicAuth, path: str
+    session: aiohttp.ClientSession, base_url: str, headers: dict[str, str], path: str
 ):
     url = f"{base_url}/api/v1/{path}"
-    async with session.get(url, auth=auth, timeout=TIMEOUT) as response:
+    async with session.get(url, headers=headers, timeout=TIMEOUT) as response:
         response.raise_for_status()
         return await response.json(content_type=None)
 
@@ -76,18 +76,18 @@ async def get_json(
 async def put_json(
     session: aiohttp.ClientSession,
     base_url: str,
-    auth: aiohttp.BasicAuth,
+    headers: dict[str, str],
     path: str,
     payload,
 ):
     url = f"{base_url}/api/v1/{path}"
-    async with session.put(url, json=payload, auth=auth, timeout=TIMEOUT) as response:
+    async with session.put(url, json=payload, headers=headers, timeout=TIMEOUT) as response:
         response.raise_for_status()
         return await response.json(content_type=None)
 
 
 async def check_temperature_units(
-    session: aiohttp.ClientSession, base_url: str, auth: aiohttp.BasicAuth
+    session: aiohttp.ClientSession, base_url: str, headers: dict[str, str]
 ) -> None:
     """Determine whether deviceSettings.temperatureUnits affects the
     currentStatus temperature payload.
@@ -98,7 +98,7 @@ async def check_temperature_units(
     """
     print("\nChecking temperature units")
 
-    settings = await get_json(session, base_url, auth, "deviceSettings")
+    settings = await get_json(session, base_url, headers, "deviceSettings")
     original_units = settings.get("temperatureUnits")
     print(f"  deviceSettings.temperatureUnits (before): {original_units!r}")
 
@@ -108,7 +108,7 @@ async def check_temperature_units(
     known_units = str(original_units).upper() if original_units else None
     probe_units = {"C": "F", "F": "C"}.get(known_units)
 
-    status_before = await get_json(session, base_url, auth, "currentStatus")
+    status_before = await get_json(session, base_url, headers, "currentStatus")
     temp_before = status_before["devices"][0]["deviceMeasurements"]["temperature"]
     print(f"  currentStatus temperature (units={original_units!r}): {temp_before}")
 
@@ -122,9 +122,9 @@ async def check_temperature_units(
 
     try:
         await put_json(
-            session, base_url, auth, "deviceSettings", {"temperatureUnits": probe_units}
+            session, base_url, headers, "deviceSettings", {"temperatureUnits": probe_units}
         )
-        status_after = await get_json(session, base_url, auth, "currentStatus")
+        status_after = await get_json(session, base_url, headers, "currentStatus")
         temp_after = status_after["devices"][0]["deviceMeasurements"]["temperature"]
         print(f"  currentStatus temperature (units={probe_units!r}): {temp_after}")
 
@@ -148,11 +148,11 @@ async def check_temperature_units(
         await put_json(
             session,
             base_url,
-            auth,
+            headers,
             "deviceSettings",
             {"temperatureUnits": original_units},
         )
-        restored = await get_json(session, base_url, auth, "deviceSettings")
+        restored = await get_json(session, base_url, headers, "deviceSettings")
         print(
             f"  deviceSettings.temperatureUnits (restored): "
             f"{restored.get('temperatureUnits')!r} (expected {original_units!r})"
@@ -163,7 +163,7 @@ async def main(host: str) -> int:
     user = os.environ["SURGEX_USER"]
     password = os.environ["SURGEX_PASS"]
     base_url = f"http://{host}"
-    auth = aiohttp.BasicAuth(user, password)
+    headers = {"Authorization": aiohttp.encode_basic_auth(user, password)}
 
     print("=" * 72)
     print(f"LIVE DEVICE CHECK against {host} -- THIS TOGGLES REAL HARDWARE.")
@@ -240,11 +240,11 @@ async def main(host: str) -> int:
             "device-scoped", client.reset_energy(status.device_path)
         )
         await try_reset_energy(
-            "unscoped", raw_command(session, base_url, auth, "ResetEnergyUsage")
+            "unscoped", raw_command(session, base_url, headers, "ResetEnergyUsage")
         )
 
         # Resolve whether temperatureUnits affects the currentStatus payload.
-        await check_temperature_units(session, base_url, auth)
+        await check_temperature_units(session, base_url, headers)
 
     print("\nLive check passed.")
     return 0
