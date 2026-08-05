@@ -55,7 +55,9 @@ class SurgexClient:
         self._host = host
         self._port = port
         self._use_https = use_https
-        self._auth = aiohttp.BasicAuth(username, password)
+        # Built once, as a plain header rather than aiohttp.BasicAuth: both the
+        # class and the request `auth` parameter are removed in aiohttp 4.0.
+        self._auth_headers = {"Authorization": aiohttp.encode_basic_auth(username, password)}
 
     @property
     def base_url(self) -> str:
@@ -75,7 +77,7 @@ class SurgexClient:
         url = f"{self.base_url}/api/v1/{path}"
         kwargs: dict[str, Any] = {"timeout": TIMEOUT}
         if authenticated:
-            kwargs["auth"] = self._auth
+            kwargs["headers"] = self._auth_headers
         if method == "POST":
             kwargs["json"] = []
 
