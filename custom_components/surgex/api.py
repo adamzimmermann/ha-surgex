@@ -8,6 +8,7 @@ Live Firmware Findings in the design spec.
 from __future__ import annotations
 
 import asyncio
+import base64
 from typing import Any
 
 import aiohttp
@@ -55,9 +56,20 @@ class SurgexClient:
         self._host = host
         self._port = port
         self._use_https = use_https
-        # Built once, as a plain header rather than aiohttp.BasicAuth: both the
-        # class and the request `auth` parameter are removed in aiohttp 4.0.
-        self._auth_headers = {"Authorization": aiohttp.encode_basic_auth(username, password)}
+        # Built once, by hand, and deliberately not with any aiohttp helper.
+        # aiohttp.BasicAuth and the request `auth` parameter are removed in
+        # aiohttp 4.0, but their replacement -- aiohttp.encode_basic_auth --
+        # only exists from aiohttp 3.14, which Home Assistant did not ship
+        # until 2026.7. Calling it raises AttributeError on every release from
+        # this integration's declared floor (2026.2) through 2026.6, taking
+        # the whole integration down at setup.
+        #
+        # Basic auth is base64 of "user:password" (RFC 7617) and nothing more,
+        # so encoding it directly works identically on every aiohttp version
+        # and needs no feature detection. UTF-8 matches what
+        # aiohttp.encode_basic_auth does.
+        credentials = base64.b64encode(f"{username}:{password}".encode()).decode()
+        self._auth_headers = {"Authorization": f"Basic {credentials}"}
 
     @property
     def base_url(self) -> str:
