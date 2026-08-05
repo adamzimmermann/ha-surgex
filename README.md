@@ -58,7 +58,7 @@ The Squid advertises itself over mDNS, so Home Assistant usually discovers it
 and only asks for credentials. Otherwise add it from
 **Settings → Devices & services → Add integration → SurgeX** and enter the host.
 
-The default administrator password is `Adm1n-XXXXXX`, where `XXXXXX` is the last
+The default administrator password is `Adm1nXXXXXX`, where `XXXXXX` is the last
 six characters of the device's MAC address, unless it has been changed.
 
 ## Options
