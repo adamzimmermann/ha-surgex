@@ -9,6 +9,8 @@ htmlcov/
 .DS_Store
 .superpowers/
 
-# Local development helper: overwrites the HACS-managed install, so it is
-# deliberately not published.
+# Guard, not a file that exists. A deploy script that copies this integration
+# straight into a Home Assistant config directory would overwrite a
+# HACS-managed install and desync the version HACS believes it installed.
+# Installation is through HACS; keep it that way.
 scripts/deploy.sh
