@@ -124,7 +124,7 @@ class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
         still caught before an entry is created.
 
         The TXT properties are a machine interface the device commits to
-        (`serial=`, `mac=AC:A6:67:00:33:00`, `ssl=False`, `version=...`,
+        (`serial=`, `mac=AA:BB:CC:00:11:22`, `ssl=False`, `version=...`,
         `type=squid`), unlike the cosmetic display name — so identity is read
         from there, not parsed out of `discovery_info.name`.
         """
