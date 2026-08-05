@@ -65,7 +65,12 @@ class SurgexClient:
         return f"{scheme}://{host}"
 
     async def _request(
-        self, method: str, path: str, *, authenticated: bool = True
+        self,
+        method: str,
+        path: str,
+        *,
+        authenticated: bool = True,
+        probe_auth: bool = True,
     ) -> Any:
         url = f"{self.base_url}/api/v1/{path}"
         kwargs: dict[str, Any] = {"timeout": TIMEOUT}
@@ -89,7 +94,30 @@ class SurgexClient:
         except asyncio.TimeoutError as err:
             raise SurgexConnectionError(f"Timed out contacting {url}") from err
         except aiohttp.ClientError as err:
+            # Squid firmware sends a malformed 401: it declares Content-Length: 0
+            # and then writes a stray "0" body anyway. Strict HTTP parsers reject
+            # the whole response, so the 401 status is never visible here and a
+            # rejected password would otherwise look like a network outage --
+            # leaving entities unavailable instead of prompting for reauth.
+            #
+            # Disambiguate by asking the device who it is. WhoAreYou needs no
+            # credentials, so if it answers, the device is reachable and healthy
+            # and the only thing wrong with the failed request was the password.
+            if authenticated and probe_auth and await self._reachable():
+                raise SurgexAuthError(
+                    "Credentials rejected by the device (malformed 401 response)"
+                ) from err
             raise SurgexConnectionError(f"Could not reach {url}: {err}") from err
+
+    async def _reachable(self) -> bool:
+        """Whether the device answers its unauthenticated identity endpoint."""
+        try:
+            await self._request(
+                "GET", "WhoAreYou", authenticated=False, probe_auth=False
+            )
+        except SurgexError:
+            return False
+        return True
 
     async def _command(self, path: str) -> None:
         """Run a control command, which must return the JSON literal true."""
