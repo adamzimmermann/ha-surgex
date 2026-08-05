@@ -140,6 +140,12 @@ async def main(host: str) -> int:
     base_url = f"http://{host}"
     auth = aiohttp.BasicAuth(user, password)
 
+    print("=" * 72)
+    print(f"LIVE DEVICE CHECK against {host} -- THIS TOGGLES REAL HARDWARE.")
+    print("It will pick one non-hidden outlet, power it on then off, then")
+    print("restore it to whatever state it was in before this script ran.")
+    print("=" * 72)
+
     async with aiohttp.ClientSession() as session:
         client = SurgexClient(session, host, user, password)
 
@@ -156,21 +162,50 @@ async def main(host: str) -> int:
             flag = " [hidden]" if outlet.hidden else ""
             print(f"  {outlet.id} {outlet.name!r} state={outlet.state}{flag}")
 
-        # Round-trip a safe outlet. Nothing is plugged in.
+        # Round-trip a safe outlet. Nothing is plugged in on this unit today,
+        # but the script must not assume that -- it snapshots whatever state
+        # the outlet is actually in and restores it, the same way the
+        # temperature-units check restores deviceSettings.
         target = next(o for o in status.outlets if not o.hidden)
-        print(f"\nToggling {target.id} ({target.name})")
+        original_is_on = target.is_on
+        print(
+            f"\nSelected outlet {target.id} ({target.name!r}) for the "
+            f"round-trip -- currently {'ON' if original_is_on else 'OFF'}. "
+            f"It will be restored to that state when this script exits, "
+            f"even if an assertion below fails."
+        )
 
-        await client.power_on(target.control_path)
-        await asyncio.sleep(3)
-        after_on = parse_current_status(await client.current_status()).outlet(target.id)
-        print(f"  after PowerOn : state={after_on.state} is_on={after_on.is_on}")
-        assert after_on.is_on, "PowerOn did not take effect"
+        try:
+            await client.power_on(target.control_path)
+            await asyncio.sleep(3)
+            after_on = parse_current_status(await client.current_status()).outlet(
+                target.id
+            )
+            print(f"  after PowerOn : state={after_on.state} is_on={after_on.is_on}")
+            assert after_on.is_on, "PowerOn did not take effect"
 
-        await client.power_off(target.control_path)
-        await asyncio.sleep(3)
-        after_off = parse_current_status(await client.current_status()).outlet(target.id)
-        print(f"  after PowerOff: state={after_off.state} is_on={after_off.is_on}")
-        assert not after_off.is_on, "PowerOff did not take effect"
+            await client.power_off(target.control_path)
+            await asyncio.sleep(3)
+            after_off = parse_current_status(await client.current_status()).outlet(
+                target.id
+            )
+            print(f"  after PowerOff: state={after_off.state} is_on={after_off.is_on}")
+            assert not after_off.is_on, "PowerOff did not take effect"
+        finally:
+            # Restore unconditionally -- this must run even if an assertion
+            # above raised partway through the round-trip.
+            if original_is_on:
+                await client.power_on(target.control_path)
+            else:
+                await client.power_off(target.control_path)
+            await asyncio.sleep(3)
+            restored = parse_current_status(await client.current_status()).outlet(
+                target.id
+            )
+            print(
+                f"  restored      : state={restored.state} is_on={restored.is_on} "
+                f"(expected is_on={original_is_on})"
+            )
 
         # Resolve the documented ambiguity in the ResetEnergyUsage path.
         # Two explicit, clearly-labelled attempts -- energyUsage currently
