@@ -36,3 +36,10 @@ def who_are_you() -> dict:
 def auto_enable_custom_integrations(enable_custom_integrations):
     """Required by pytest-homeassistant-custom-component to load custom_components."""
     yield
+
+
+@pytest.fixture
+def device_registry(hass):
+    from homeassistant.helpers import device_registry as dr
+
+    return dr.async_get(hass)

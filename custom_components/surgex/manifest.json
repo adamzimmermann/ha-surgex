@@ -1,0 +1,13 @@
+{
+  "domain": "surgex",
+  "name": "SurgeX",
+  "codeowners": ["@adamzimmermann"],
+  "config_flow": true,
+  "documentation": "https://github.com/adamzimmermann/ha-surgex",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/adamzimmermann/ha-surgex/issues",
+  "requirements": [],
+  "version": "0.1.0",
+  "zeroconf": ["_ametekhttp._tcp.local."]
+}
