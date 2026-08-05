@@ -53,6 +53,9 @@
       "frequency": { "name": "Frequency" },
       "power_factor": { "name": "Power factor" },
       "input_state": { "name": "Input state" }
+    },
+    "button": {
+      "reset_energy": { "name": "Reset energy usage" }
     }
   }
 }
