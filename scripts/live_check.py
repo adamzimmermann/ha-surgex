@@ -38,6 +38,13 @@ from custom_components.surgex.api import (
 )
 from custom_components.surgex.models import SquidStatus, parse_current_status
 
+# How long to wait after a command before reading the result back. The device
+# does not apply commands instantly, so a read taken too soon returns the
+# pre-command state and the check fails against working hardware. This is the
+# same settle time const.REQUEST_REFRESH_COOLDOWN uses, for the same reason.
+# Tests set it to 0; nothing else should change it.
+SETTLE_SECONDS = 3
+
 
 async def check_rejected_password(
     session: aiohttp.ClientSession, host: str, user: str, password: str
@@ -104,7 +111,7 @@ async def check_reset_energy(client: SurgexClient, status: SquidStatus) -> None:
 
     stamp_before = status.measurements.energy_reset
     await client.reset_energy(status.device_path)
-    await asyncio.sleep(3)
+    await asyncio.sleep(SETTLE_SECONDS)
     after = parse_current_status(await client.current_status()).measurements
 
     print(f"  energyUsage     : {after.energy_wh} Wh (was {energy})")
@@ -161,7 +168,7 @@ async def main(host: str) -> int:
 
         try:
             await client.power_on(target.control_path)
-            await asyncio.sleep(3)
+            await asyncio.sleep(SETTLE_SECONDS)
             after_on = parse_current_status(await client.current_status()).outlet(
                 target.id
             )
@@ -169,7 +176,7 @@ async def main(host: str) -> int:
             assert after_on.is_on, "PowerOn did not take effect"
 
             await client.power_off(target.control_path)
-            await asyncio.sleep(3)
+            await asyncio.sleep(SETTLE_SECONDS)
             after_off = parse_current_status(await client.current_status()).outlet(
                 target.id
             )
@@ -182,7 +189,7 @@ async def main(host: str) -> int:
                 await client.power_on(target.control_path)
             else:
                 await client.power_off(target.control_path)
-            await asyncio.sleep(3)
+            await asyncio.sleep(SETTLE_SECONDS)
             restored = parse_current_status(await client.current_status()).outlet(
                 target.id
             )
