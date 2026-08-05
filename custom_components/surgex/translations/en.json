@@ -56,6 +56,10 @@
     },
     "button": {
       "reset_energy": { "name": "Reset energy usage" }
+    },
+    "binary_sensor": {
+      "surge_protection": { "name": "Surge protection" },
+      "wiring_fault": { "name": "Wiring fault" }
     }
   }
 }
