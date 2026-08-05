@@ -53,14 +53,45 @@ jobs:
           category: integration
 
   pytest:
-    name: Pytest
+    name: Pytest (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      # Both results are wanted: knowing the floor broke is no reason to stop
+      # reporting whether current Home Assistant is fine, and vice versa.
+      fail-fast: false
+      matrix:
+        include:
+          - name: current HA
+            requirements: requirements-test.txt
+            check_floor: false
+          # Testing only the newest HA once hid a real break: HA shipped aiohttp
+          # 3.13 until 2026.7, and code written against an aiohttp 3.14 API took
+          # the integration down on every release from 2026.2 to 2026.6 while CI
+          # stayed green. The floor is only supported if it is exercised.
+          - name: minimum supported HA
+            requirements: requirements-test-min.txt
+            check_floor: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"
       - name: Install dependencies
-        run: pip install -r requirements-test.txt
+        run: pip install -r ${{ matrix.requirements }}
+      - name: Confirm the installed HA matches the floor declared in hacs.json
+        if: matrix.check_floor
+        run: |
+          set -euo pipefail
+          declared="$(jq -r '.homeassistant' hacs.json)"
+          installed="$(python -c 'import homeassistant.const as c; print(c.__version__)')"
+          if [ "$declared" != "$installed" ]; then
+            echo "::error file=requirements-test-min.txt::hacs.json claims support \
+          from HA ${declared}, but this job tests ${installed}. Point \
+          requirements-test-min.txt at the pytest-homeassistant-custom-component \
+          release pinning ${declared}, or correct hacs.json -- otherwise the \
+          declared floor is untested."
+            exit 1
+          fi
+          echo "Testing HA ${installed}, matching the floor declared in hacs.json."
       - name: Run tests
         run: pytest -v

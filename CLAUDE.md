@@ -42,6 +42,24 @@ Python 3.14, on pushes to `main`, pull requests, and `v*` tags. Hassfest needs
 Docker and cannot run locally; `tests/test_manifest.py` mirrors its structural
 checks so they run every time.
 
+**Pytest runs as a matrix over two Home Assistant versions**: current
+(`requirements-test.txt`) and the oldest supported (`requirements-test-min.txt`,
+pinned to the `homeassistant` floor in `hacs.json`). A CI step fails if those two
+drift apart, because a floor nobody tests is not a floor.
+
+To reproduce the minimum-version run locally:
+
+```bash
+python3.14 -m venv /tmp/venv-min
+/tmp/venv-min/bin/pip install -r requirements-test-min.txt
+/tmp/venv-min/bin/python -m pytest -q
+```
+
+The dependency HA pins matters as much as HA's own API surface. `encode_basic_auth`
+shipped in aiohttp 3.14, and HA carried aiohttp 3.13 until 2026.7 — so code using it
+was fine on current HA and broken on everything from 2026.2 to 2026.6. When reaching
+for a library API, check the version HA pins at the floor, not the one in `.venv`.
+
 ## Releasing
 
 **The git tag must be `v` + the `version` in `manifest.json`, exactly.** Bump the
