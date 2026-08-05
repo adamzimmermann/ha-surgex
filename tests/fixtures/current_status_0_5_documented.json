@@ -1,0 +1,52 @@
+{
+  "model": "SX-DC-8-1224",
+  "serial": "240320200000",
+  "activeState": "Running",
+  "objType": "currentStatus",
+  "temperatureUnits": "F",
+  "MAC": ["0E:B3:3A:D5:A0:64"],
+  "time": "2020-03-24T18:11:04Z",
+  "firmware": "0.5.25384",
+  "devices": [
+    {
+      "id": "/1",
+      "name": "Default Squid Device",
+      "deviceType": "SquidDevice",
+      "nominalVoltage": 120,
+      "nominalFrequency": 60,
+      "connected": true,
+      "deviceMeasurements": {
+        "energyUsage": 1435072,
+        "energyUsageTime": "2020-01-07T17:17:27Z",
+        "line1Line2": 118.300003,
+        "voltageLN": 118.300003,
+        "temperature": 30.5,
+        "measurementBanks": 0,
+        "frequency": 60.188999,
+        "surgeGood": true,
+        "current": 6.01,
+        "pf": 0.85,
+        "outletCount": 6,
+        "voltageRating": 120,
+        "power": 777,
+        "inputState": ["No Ground"]
+      },
+      "groups": [
+        {
+          "id": "/1/10",
+          "name": "All Outlets",
+          "deviceType": "OutletGroup",
+          "outlets": ["/1/1", "/1/2", "/1/3", "/1/4", "/1/5", "/1/6"]
+        }
+      ],
+      "outlets": [
+        {"state": 1, "id": "/1/1", "name": "Monitor", "physicalName": "AC Outlet 1", "deviceType": "Outlet", "outputVoltageType": "AC", "plugType": "IEC", "rebootTime": 25, "connected": true, "configVoltage": 120},
+        {"state": 1, "id": "/1/2", "name": "Apple TV", "physicalName": "AC Outlet 2", "deviceType": "Outlet", "outputVoltageType": "AC", "plugType": "IEC", "rebootTime": 8, "connected": true, "configVoltage": 120},
+        {"state": 0, "id": "/1/3", "name": "Cable TV", "physicalName": "AC Outlet 3", "deviceType": "Outlet", "outputVoltageType": "AC", "plugType": "IEC", "rebootTime": 8, "connected": true, "configVoltage": 120},
+        {"state": 2, "id": "/1/4", "name": "Codec", "physicalName": "AC Outlet 4", "deviceType": "Outlet", "outputVoltageType": "AC", "plugType": "IEC", "rebootTime": 8, "connected": true, "configVoltage": 120},
+        {"state": 1, "id": "/1/5", "name": "12V - Network Switch", "physicalName": "DC Bank 1", "deviceType": "Outlet", "outputVoltageType": "DC", "plugType": "TerminalBlock2", "rebootTime": 25, "connected": true, "configVoltage": 12},
+        {"state": 1, "id": "/1/6", "name": "24V - Control System", "physicalName": "DC Bank 2", "deviceType": "Outlet", "outputVoltageType": "DC", "plugType": "TerminalBlock2", "rebootTime": 25, "connected": true, "configVoltage": 24}
+      ]
+    }
+  ]
+}
