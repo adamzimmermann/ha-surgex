@@ -22,11 +22,6 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          # The brands check requires an entry in home-assistant/brands, which
-          # only applies to inclusion in the HACS default store. Installing from
-          # a custom repository does not need it. Drop this ignore if this
-          # integration is ever submitted to the default store.
-          ignore: brands
 
   pytest:
     name: Pytest
