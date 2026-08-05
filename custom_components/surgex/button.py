@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import SurgexConfigEntry, SurgexCoordinator
 from .entity import SurgexEntity
+from .models import SquidOutlet
 
 
 async def async_setup_entry(
@@ -39,13 +40,25 @@ class SurgexRebootButton(SurgexEntity, ButtonEntity):
         if outlet.hidden:
             self._attr_entity_category = EntityCategory.CONFIG
 
+    @property
+    def _outlet(self) -> SquidOutlet | None:
+        return self.status.outlet(self._outlet_id)
+
+    @property
+    def available(self) -> bool:
+        """Match SurgexOutletSwitch: a vanished outlet greys out, not errors."""
+        return super().available and self._outlet is not None
+
     async def async_press(self) -> None:
-        outlet = self.status.outlet(self._outlet_id)
+        outlet = self._outlet
         if outlet is None:
             raise HomeAssistantError(
                 f"Outlet {self._outlet_id} is no longer reported by the device"
             )
-        await self.coordinator.client.reboot(outlet.control_path)
+        with self.command("reboot", outlet.id):
+            await self.coordinator.client.reboot(outlet.control_path)
+        # A button carries no state of its own, so there is nothing to set
+        # optimistically — but the outlet switch does, and a reboot changes it.
         await self.coordinator.async_request_refresh()
 
 
@@ -59,5 +72,7 @@ class SurgexResetEnergyButton(SurgexEntity, ButtonEntity):
         super().__init__(coordinator, "reset_energy")
 
     async def async_press(self) -> None:
-        await self.coordinator.client.reset_energy(self.status.device_path)
+        device_path = self.status.device_path
+        with self.command("reset energy usage", f"/{device_path}"):
+            await self.coordinator.client.reset_energy(device_path)
         await self.coordinator.async_request_refresh()

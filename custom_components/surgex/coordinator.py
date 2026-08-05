@@ -16,6 +16,7 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import (
@@ -24,7 +25,13 @@ from .api import (
     SurgexClient,
     SurgexConnectionError,
 )
-from .const import CONF_USE_HTTPS, DEFAULT_PORT, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import (
+    CONF_USE_HTTPS,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    REQUEST_REFRESH_COOLDOWN,
+)
 from .models import SquidStatus, SurgexParseError, parse_current_status
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,6 +54,17 @@ class SurgexCoordinator(DataUpdateCoordinator[SquidStatus]):
             name=DOMAIN,
             update_interval=timedelta(seconds=interval),
             config_entry=entry,
+            # HA's default request-refresh debouncer is immediate, which would
+            # poll the device before it has applied the command just sent and
+            # overwrite an entity's optimistic state with the stale reading.
+            # Defer the confirming poll instead; repeated commands inside the
+            # window collapse into one request.
+            request_refresh_debouncer=Debouncer(
+                hass,
+                _LOGGER,
+                cooldown=REQUEST_REFRESH_COOLDOWN,
+                immediate=False,
+            ),
         )
 
     async def _async_update_data(self) -> SquidStatus:
