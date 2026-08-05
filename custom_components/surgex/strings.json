@@ -1,0 +1,26 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to your SurgeX Squid",
+        "description": "Enter the address and administrator credentials for the device.",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password",
+          "port": "Port",
+          "use_https": "Use HTTPS"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the device at that address.",
+      "invalid_auth": "The device rejected those credentials.",
+      "not_a_squid": "That address responded, but it is not a SurgeX device.",
+      "unknown": "Unexpected error talking to the device."
+    },
+    "abort": {
+      "already_configured": "This device is already set up."
+    }
+  }
+}
