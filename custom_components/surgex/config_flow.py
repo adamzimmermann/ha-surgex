@@ -193,7 +193,7 @@ class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             data = {**entry.data, **user_input}
             try:
-                await self._probe(data)
+                mac, _ = await self._probe(data)
             except NotASquidError:
                 errors["base"] = "not_a_squid"
             except SurgexAuthError:
@@ -203,6 +203,12 @@ class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
             except SurgexError:
                 errors["base"] = "unknown"
             else:
+                # The stored host may since have been handed to a different
+                # Squid, or the unit replaced. Without this the entry would
+                # keep the old MAC as its unique_id while polling other
+                # hardware, silently rebinding every entity.
+                await self.async_set_unique_id(mac)
+                self._abort_if_unique_id_mismatch(reason="unique_id_mismatch")
                 return self.async_update_reload_and_abort(entry, data=data)
 
         return self.async_show_form(

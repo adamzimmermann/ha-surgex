@@ -10,6 +10,7 @@ for the real hassfest run via home-assistant/actions/hassfest.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
@@ -55,3 +56,32 @@ async def test_integration_loads_via_ha_loader(hass: HomeAssistant):
 
     assert manifest["requirements"] == []
     assert manifest["zeroconf"] == ["_ametekhttp._tcp.local."]
+
+
+def test_english_translations_match_strings_json():
+    """translations/en.json is the English rendering of strings.json.
+
+    They are maintained by hand, so nothing but a test stops one from gaining
+    a key the other lacks -- which shows up as a raw key like
+    `unique_id_mismatch` in the UI rather than a sentence.
+    """
+    strings = (INTEGRATION_DIR / "strings.json").read_bytes()
+    english = (INTEGRATION_DIR / "translations" / "en.json").read_bytes()
+    assert strings == english, (
+        "strings.json and translations/en.json have drifted apart; "
+        "they must stay byte-identical"
+    )
+
+
+def test_every_config_flow_abort_and_error_reason_has_a_string():
+    """Any reason the flow can emit must resolve to a sentence, not a raw key."""
+    source = (INTEGRATION_DIR / "config_flow.py").read_text()
+    config = json.loads((INTEGRATION_DIR / "strings.json").read_text())["config"]
+
+    aborts = re.findall(r'async_abort\(reason="([a-z_]+)"\)', source)
+    aborts += re.findall(r'_abort_if_unique_id_mismatch\(reason="([a-z_]+)"\)', source)
+    for reason in aborts:
+        assert reason in config["abort"], f"abort reason {reason!r} has no string"
+
+    for error in re.findall(r'errors\["base"\] = "([a-z_]+)"', source):
+        assert error in config["error"], f"error key {error!r} has no string"

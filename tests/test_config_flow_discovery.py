@@ -155,6 +155,41 @@ async def test_reauth_updates_password(hass, who_are_you, status_1_01):
     assert entry.data[CONF_PASSWORD] == "new"
 
 
+async def test_reauth_aborts_when_the_host_is_now_a_different_device(
+    hass, who_are_you, status_1_01
+):
+    """DHCP handed the stored IP to another Squid, or the unit was replaced.
+
+    Reauth must not quietly rebind the entry's entities to different hardware
+    while keeping the old MAC as its unique_id.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_HOST: "192.168.1.131", CONF_USERNAME: "admin", CONF_PASSWORD: "old"},
+        unique_id="aabbcc001122",
+    )
+    entry.add_to_hass(hass)
+
+    other_device = {**who_are_you, "MAC": ["11:22:33:44:55:66"]}
+
+    result = await entry.start_reauth_flow(hass)
+    assert result["step_id"] == "reauth_confirm"
+
+    with (
+        patch("custom_components.surgex.config_flow.SurgexClient.who_are_you", return_value=other_device),
+        patch("custom_components.surgex.config_flow.SurgexClient.current_status", return_value=status_1_01),
+        patch("custom_components.surgex.async_setup_entry", return_value=True),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_USERNAME: "admin", CONF_PASSWORD: "new"}
+        )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "unique_id_mismatch"
+    assert entry.data[CONF_PASSWORD] == "old"
+    assert entry.unique_id == "aabbcc001122"
+
+
 async def test_options_flow_sets_scan_interval(hass, status_1_01):
     entry = MockConfigEntry(
         domain=DOMAIN,

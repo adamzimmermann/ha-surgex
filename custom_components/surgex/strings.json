@@ -32,7 +32,8 @@
     "abort": {
       "already_configured": "This device is already set up.",
       "not_a_squid": "The discovered device is not a SurgeX Squid.",
-      "reauth_successful": "Credentials updated."
+      "reauth_successful": "Credentials updated.",
+      "unique_id_mismatch": "That address is a different SurgeX device than the one this entry was set up for."
     }
   },
   "options": {
