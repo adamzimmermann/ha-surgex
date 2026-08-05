@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Mapping
 
 import voluptuous as vol
@@ -44,21 +43,12 @@ STEP_CREDENTIALS_SCHEMA = vol.Schema(
     }
 )
 
-# The Squid announces itself as `Squid Device (AA:BB:CC:00:11:22)._ametekhttp...`
-# and also embeds the MAC, sans separators, in its mDNS hostname
-# (`ametek-AABBCC001122.local.`). Either is enough to identify the device
-# without contacting it, so discovery can dedupe/abort before any credentials
-# exist to probe with.
-_MAC_WITH_SEPARATORS_RE = re.compile(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
-_MAC_BARE_RE = re.compile(r"([0-9A-Fa-f]{12})")
 
-
-def _mac_from_discovery(discovery_info: ZeroconfServiceInfo) -> str | None:
-    """Extract a MAC address from a zeroconf announcement, if present."""
-    match = _MAC_WITH_SEPARATORS_RE.search(discovery_info.name)
-    if match is None:
-        match = _MAC_BARE_RE.search(discovery_info.hostname or "")
-    return normalise_mac(match.group(1)) if match else None
+def _use_https_from_property(value: Any) -> bool:
+    """Interpret the `ssl` TXT property, which arrives as a string."""
+    if isinstance(value, bool):
+        return value
+    return isinstance(value, str) and value.strip().lower() == "true"
 
 
 class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -69,6 +59,7 @@ class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._discovered_host: str | None = None
         self._discovered_port: int = DEFAULT_PORT
+        self._discovered_use_https: bool = False
 
     async def _probe(self, data: dict[str, Any]) -> tuple[str, str]:
         """Return (mac, model), raising on failure.
@@ -124,25 +115,32 @@ class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle a device found via _ametekhttp._tcp.local.
 
-        The MAC comes straight out of the announcement (name or hostname), not
-        a live probe: a Squid identifies itself with no auth needed either
-        way, but reading it here means dedup/host-update happens before any
-        credentials are on hand to probe with. `async_step_discovery_confirm`
-        still runs the full `_probe` once the user supplies credentials, so a
-        stale/misleading announcement is still caught before an entry is
-        created.
+        Identity comes from the announcement's TXT properties (`mac`, `type`),
+        not a live probe: a Squid identifies itself with no auth needed
+        either way, but reading it here means dedup/host-update happens
+        before any credentials are on hand to probe with.
+        `async_step_discovery_confirm` still runs the full `_probe` once the
+        user supplies credentials, so a stale/misleading announcement is
+        still caught before an entry is created.
+
+        The TXT properties are a machine interface the device commits to
+        (`serial=`, `mac=AC:A6:67:00:33:00`, `ssl=False`, `version=...`,
+        `type=squid`), unlike the cosmetic display name — so identity is read
+        from there, not parsed out of `discovery_info.name`.
         """
         host = str(discovery_info.ip_address)
+        properties = discovery_info.properties
 
-        mac = _mac_from_discovery(discovery_info)
-        if mac is None:
+        mac = properties.get("mac")
+        if not mac or str(properties.get("type", "")).lower() != "squid":
             return self.async_abort(reason="not_a_squid")
 
-        await self.async_set_unique_id(mac)
+        await self.async_set_unique_id(normalise_mac(mac))
         self._abort_if_unique_id_configured(updates={CONF_HOST: host})
 
         self._discovered_host = host
         self._discovered_port = discovery_info.port or DEFAULT_PORT
+        self._discovered_use_https = _use_https_from_property(properties.get("ssl"))
         self.context["title_placeholders"] = {"name": "SurgeX Squid"}
         return await self.async_step_discovery_confirm()
 
@@ -156,7 +154,7 @@ class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
             data = {
                 CONF_HOST: self._discovered_host,
                 CONF_PORT: self._discovered_port,
-                CONF_USE_HTTPS: False,
+                CONF_USE_HTTPS: self._discovered_use_https,
                 **user_input,
             }
             try:
