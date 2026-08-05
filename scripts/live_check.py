@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Exercise the integration's client against the real device.
+
+This is the check that mocked unit tests cannot do: it talks to an actual
+SurgeX Squid PDU and confirms identity, parsing, control, and two
+documentation ambiguities the design spec flagged.
+
+Usage:
+    set -a; . ./.secrets.env; set +a
+    .venv/bin/python scripts/live_check.py 192.168.1.131
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import aiohttp
+
+from custom_components.surgex.api import SurgexApiError, SurgexClient
+from custom_components.surgex.models import parse_current_status
+
+TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+
+async def try_reset_energy(label: str, coro) -> None:
+    """Attempt one ResetEnergyUsage path and report accepted/rejected.
+
+    Uses only the client's public API (or, for the unscoped path, a raw
+    request built the same way the client builds its own) -- no reaching
+    into private methods. A malformed path on this firmware can also hang
+    the connection rather than returning a clean HTTP error, so connection
+    failures are reported as a distinct outcome rather than crashing.
+    """
+    try:
+        await coro
+    except SurgexApiError as err:
+        print(f"  {label:14}: rejected ({err})")
+    except (asyncio.TimeoutError, aiohttp.ClientError) as err:
+        print(f"  {label:14}: no response / connection error ({err!r})")
+    else:
+        print(f"  {label:14}: ACCEPTED")
+
+
+async def raw_command(
+    session: aiohttp.ClientSession, base_url: str, auth: aiohttp.BasicAuth, path: str
+) -> None:
+    """POST a control command exactly the way SurgexClient does, without
+    going through the client. Needed to probe the unscoped ResetEnergyUsage
+    path, which the client's public API has no method for.
+    """
+    url = f"{base_url}/api/v1/{path}"
+    async with session.post(url, json=[], auth=auth, timeout=TIMEOUT) as response:
+        if response.status >= 400:
+            raise SurgexApiError(f"POST {path} returned HTTP {response.status}")
+        result = await response.json(content_type=None)
+    if result is not True:
+        raise SurgexApiError(f"Command {path} was not accepted (returned {result!r})")
+
+
+async def get_json(
+    session: aiohttp.ClientSession, base_url: str, auth: aiohttp.BasicAuth, path: str
+):
+    url = f"{base_url}/api/v1/{path}"
+    async with session.get(url, auth=auth, timeout=TIMEOUT) as response:
+        response.raise_for_status()
+        return await response.json(content_type=None)
+
+
+async def put_json(
+    session: aiohttp.ClientSession,
+    base_url: str,
+    auth: aiohttp.BasicAuth,
+    path: str,
+    payload,
+):
+    url = f"{base_url}/api/v1/{path}"
+    async with session.put(url, json=payload, auth=auth, timeout=TIMEOUT) as response:
+        response.raise_for_status()
+        return await response.json(content_type=None)
+
+
+async def check_temperature_units(
+    session: aiohttp.ClientSession, base_url: str, auth: aiohttp.BasicAuth
+) -> None:
+    """Determine whether deviceSettings.temperatureUnits affects the
+    currentStatus temperature payload.
+
+    api.py deliberately has no deviceSettings methods -- it is read/control
+    only -- so this talks to the endpoint directly rather than adding
+    settings-writing methods to the client.
+    """
+    print("\nChecking temperature units")
+
+    settings = await get_json(session, base_url, auth, "deviceSettings")
+    original_units = settings.get("temperatureUnits")
+    print(f"  deviceSettings.temperatureUnits (before): {original_units!r}")
+
+    status_before = await get_json(session, base_url, auth, "currentStatus")
+    temp_before = status_before["devices"][0]["deviceMeasurements"]["temperature"]
+    print(f"  currentStatus temperature (units={original_units!r}): {temp_before}")
+
+    try:
+        await put_json(
+            session, base_url, auth, "deviceSettings", {"temperatureUnits": "C"}
+        )
+        status_after = await get_json(session, base_url, auth, "currentStatus")
+        temp_after = status_after["devices"][0]["deviceMeasurements"]["temperature"]
+        print(f"  currentStatus temperature (units='C'): {temp_after}")
+
+        if temp_before == temp_after:
+            print(
+                "  VERDICT: value unchanged -- payload is Celsius regardless of "
+                "temperatureUnits. models.py is already correct."
+            )
+        else:
+            print(
+                "  VERDICT: value changed -- temperatureUnits is meaningful. "
+                "models.py needs to convert when units are 'F'."
+            )
+    finally:
+        # Leaving the user's device in a changed state is not acceptable.
+        # Restore unconditionally, even if the check above raised.
+        await put_json(
+            session, base_url, auth, "deviceSettings", {"temperatureUnits": "F"}
+        )
+        restored = await get_json(session, base_url, auth, "deviceSettings")
+        print(
+            f"  deviceSettings.temperatureUnits (restored): "
+            f"{restored.get('temperatureUnits')!r}"
+        )
+
+
+async def main(host: str) -> int:
+    user = os.environ["SURGEX_USER"]
+    password = os.environ["SURGEX_PASS"]
+    base_url = f"http://{host}"
+    auth = aiohttp.BasicAuth(user, password)
+
+    async with aiohttp.ClientSession() as session:
+        client = SurgexClient(session, host, user, password)
+
+        identity = await client.who_are_you()
+        print(f"WhoAreYou    : {identity['model']} fw {identity['firmware']}")
+
+        status = parse_current_status(await client.current_status())
+        print(f"Parsed       : {status.model} / {len(status.outlets)} outlets")
+        print(f"unique_id    : {status.unique_id}")
+        print(f"input_state  : {status.input_state}")
+        print(f"wiring_fault : {status.wiring_fault}")
+        print(f"temperature  : {status.measurements.temperature_c} (treated as C)")
+        for outlet in status.outlets:
+            flag = " [hidden]" if outlet.hidden else ""
+            print(f"  {outlet.id} {outlet.name!r} state={outlet.state}{flag}")
+
+        # Round-trip a safe outlet. Nothing is plugged in.
+        target = next(o for o in status.outlets if not o.hidden)
+        print(f"\nToggling {target.id} ({target.name})")
+
+        await client.power_on(target.control_path)
+        await asyncio.sleep(3)
+        after_on = parse_current_status(await client.current_status()).outlet(target.id)
+        print(f"  after PowerOn : state={after_on.state} is_on={after_on.is_on}")
+        assert after_on.is_on, "PowerOn did not take effect"
+
+        await client.power_off(target.control_path)
+        await asyncio.sleep(3)
+        after_off = parse_current_status(await client.current_status()).outlet(target.id)
+        print(f"  after PowerOff: state={after_off.state} is_on={after_off.is_on}")
+        assert not after_off.is_on, "PowerOff did not take effect"
+
+        # Resolve the documented ambiguity in the ResetEnergyUsage path.
+        # Two explicit, clearly-labelled attempts -- energyUsage currently
+        # reads 0, so either outcome is harmless.
+        print("\nProbing ResetEnergyUsage paths")
+        await try_reset_energy(
+            "device-scoped", client.reset_energy(status.device_path)
+        )
+        await try_reset_energy(
+            "unscoped", raw_command(session, base_url, auth, "ResetEnergyUsage")
+        )
+
+        # Resolve whether temperatureUnits affects the currentStatus payload.
+        await check_temperature_units(session, base_url, auth)
+
+    print("\nLive check passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else "192.168.1.131")))
