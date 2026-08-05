@@ -11,6 +11,16 @@
           "port": "Port",
           "use_https": "Use HTTPS"
         }
+      },
+      "discovery_confirm": {
+        "title": "SurgeX Squid found",
+        "description": "Enter the administrator credentials for the Squid at {host}.",
+        "data": { "username": "Username", "password": "Password" }
+      },
+      "reauth_confirm": {
+        "title": "Re-enter SurgeX credentials",
+        "description": "The device rejected the stored credentials. Enter them again.",
+        "data": { "username": "Username", "password": "Password" }
       }
     },
     "error": {
@@ -20,7 +30,17 @@
       "unknown": "Unexpected error talking to the device."
     },
     "abort": {
-      "already_configured": "This device is already set up."
+      "already_configured": "This device is already set up.",
+      "not_a_squid": "The discovered device is not a SurgeX Squid.",
+      "reauth_successful": "Credentials updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SurgeX options",
+        "data": { "scan_interval": "Polling interval (seconds)" }
+      }
     }
   }
 }

@@ -2,15 +2,29 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.const import (
+    CONF_HOST,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_SCAN_INTERVAL,
+    CONF_USERNAME,
+)
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .api import SurgexAuthError, SurgexClient, SurgexConnectionError, SurgexError
-from .const import CONF_USE_HTTPS, DEFAULT_PORT, DOMAIN
+from .const import CONF_USE_HTTPS, DEFAULT_PORT, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .models import normalise_mac
 
 STEP_USER_SCHEMA = vol.Schema(
@@ -23,11 +37,38 @@ STEP_USER_SCHEMA = vol.Schema(
     }
 )
 
+STEP_CREDENTIALS_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_USERNAME, default="admin"): str,
+        vol.Required(CONF_PASSWORD): str,
+    }
+)
+
+# The Squid announces itself as `Squid Device (AA:BB:CC:00:11:22)._ametekhttp...`
+# and also embeds the MAC, sans separators, in its mDNS hostname
+# (`ametek-AABBCC001122.local.`). Either is enough to identify the device
+# without contacting it, so discovery can dedupe/abort before any credentials
+# exist to probe with.
+_MAC_WITH_SEPARATORS_RE = re.compile(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
+_MAC_BARE_RE = re.compile(r"([0-9A-Fa-f]{12})")
+
+
+def _mac_from_discovery(discovery_info: ZeroconfServiceInfo) -> str | None:
+    """Extract a MAC address from a zeroconf announcement, if present."""
+    match = _MAC_WITH_SEPARATORS_RE.search(discovery_info.name)
+    if match is None:
+        match = _MAC_BARE_RE.search(discovery_info.hostname or "")
+    return normalise_mac(match.group(1)) if match else None
+
 
 class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for SurgeX."""
 
     VERSION = 1
+
+    def __init__(self) -> None:
+        self._discovered_host: str | None = None
+        self._discovered_port: int = DEFAULT_PORT
 
     async def _probe(self, data: dict[str, Any]) -> tuple[str, str]:
         """Return (mac, model), raising on failure.
@@ -78,17 +119,126 @@ class SurgexConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors
         )
 
+    async def async_step_zeroconf(
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> ConfigFlowResult:
+        """Handle a device found via _ametekhttp._tcp.local.
+
+        The MAC comes straight out of the announcement (name or hostname), not
+        a live probe: a Squid identifies itself with no auth needed either
+        way, but reading it here means dedup/host-update happens before any
+        credentials are on hand to probe with. `async_step_discovery_confirm`
+        still runs the full `_probe` once the user supplies credentials, so a
+        stale/misleading announcement is still caught before an entry is
+        created.
+        """
+        host = str(discovery_info.ip_address)
+
+        mac = _mac_from_discovery(discovery_info)
+        if mac is None:
+            return self.async_abort(reason="not_a_squid")
+
+        await self.async_set_unique_id(mac)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
+        self._discovered_host = host
+        self._discovered_port = discovery_info.port or DEFAULT_PORT
+        self.context["title_placeholders"] = {"name": "SurgeX Squid"}
+        return await self.async_step_discovery_confirm()
+
+    async def async_step_discovery_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect credentials for a discovered device."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            data = {
+                CONF_HOST: self._discovered_host,
+                CONF_PORT: self._discovered_port,
+                CONF_USE_HTTPS: False,
+                **user_input,
+            }
+            try:
+                _, model = await self._probe(data)
+            except NotASquidError:
+                errors["base"] = "not_a_squid"
+            except SurgexAuthError:
+                errors["base"] = "invalid_auth"
+            except SurgexConnectionError:
+                errors["base"] = "cannot_connect"
+            except SurgexError:
+                errors["base"] = "unknown"
+            else:
+                return self.async_create_entry(title=model, data=data)
+
+        return self.async_show_form(
+            step_id="discovery_confirm",
+            data_schema=STEP_CREDENTIALS_SCHEMA,
+            errors=errors,
+            description_placeholders={"host": self._discovered_host or ""},
+        )
+
     async def async_step_reauth(
         self, entry_data: Mapping[str, Any]
     ) -> ConfigFlowResult:
-        """Placeholder reauth entry point.
+        """Start reauthentication after the device rejected stored credentials."""
+        return await self.async_step_reauth_confirm()
 
-        A `ConfigEntryAuthFailed` from the coordinator makes Home Assistant
-        start a reauth flow as a background task, which would otherwise
-        crash with `UnknownStep` since this flow defines no such step yet.
-        Task 6 replaces this with the real reauth confirmation UI.
-        """
-        return self.async_abort(reason="reauth_not_implemented")
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect replacement credentials."""
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            data = {**entry.data, **user_input}
+            try:
+                await self._probe(data)
+            except NotASquidError:
+                errors["base"] = "not_a_squid"
+            except SurgexAuthError:
+                errors["base"] = "invalid_auth"
+            except SurgexConnectionError:
+                errors["base"] = "cannot_connect"
+            except SurgexError:
+                errors["base"] = "unknown"
+            else:
+                return self.async_update_reload_and_abort(entry, data=data)
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=STEP_CREDENTIALS_SCHEMA,
+            errors=errors,
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> SurgexOptionsFlow:
+        return SurgexOptionsFlow()
+
+
+class SurgexOptionsFlow(OptionsFlow):
+    """Let the user tune how often the device is polled."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_SCAN_INTERVAL, default=current): vol.All(
+                        int, vol.Range(min=5, max=600)
+                    )
+                }
+            ),
+        )
 
 
 class NotASquidError(Exception):
