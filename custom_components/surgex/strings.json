@@ -42,5 +42,17 @@
         "data": { "scan_interval": "Polling interval (seconds)" }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "power": { "name": "Power" },
+      "current": { "name": "Current" },
+      "voltage": { "name": "Voltage" },
+      "energy": { "name": "Energy" },
+      "temperature": { "name": "Temperature" },
+      "frequency": { "name": "Frequency" },
+      "power_factor": { "name": "Power factor" },
+      "input_state": { "name": "Input state" }
+    }
   }
 }
