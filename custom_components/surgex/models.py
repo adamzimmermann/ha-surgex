@@ -30,18 +30,6 @@ def normalise_mac(value: str) -> str:
     return value.replace(":", "").replace("-", "").lower()
 
 
-def _get(source: dict[str, Any], *names: str) -> Any:
-    """Return the first present key, tolerating firmware casing differences."""
-    for name in names:
-        if name in source:
-            return source[name]
-        # Firmware 1.01 PascalCases several keys the docs show lowercase.
-        swapped = name[0].swapcase() + name[1:]
-        if swapped in source:
-            return source[swapped]
-    return None
-
-
 def _as_float(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -199,7 +187,7 @@ def parse_current_status(payload: dict[str, Any]) -> SquidStatus:
     if raw_input_state is None:
         raw_input_state = measurements_raw.get("inputState")
 
-    wiring_fault = _get(device, "wiringFault")
+    wiring_fault = device.get("wiringFault")
 
     serial = payload.get("serial") or None
 

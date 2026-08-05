@@ -69,6 +69,27 @@ def test_measurements_parsed(status_0_5):
     assert m.energy_wh == 1435072
     assert m.surge_good is True
     assert m.energy_reset == datetime(2020, 1, 7, 17, 17, 27, tzinfo=timezone.utc)
+    assert m.frequency == 60.188999
+    assert m.power_factor == 0.85
+
+
+def test_device_path_and_hostname(status_1_01, status_0_5):
+    live = parse_current_status(status_1_01)
+    assert live.hostname == "ametek-AABBCC001122"
+    assert live.device_path == "1"
+
+    documented = parse_current_status(status_0_5)
+    assert documented.hostname is None
+    assert documented.device_path == "1"
+
+
+def test_boolean_in_numeric_measurement_field_is_not_coerced():
+    """bool is a subclass of int in Python; a stray True/False must not become 1.0/0.0."""
+    payload = {
+        "model": "X", "MAC": ["AA:BB:CC:00:11:22"],
+        "devices": [{"id": "/1", "deviceMeasurements": {"power": True}, "outlets": []}],
+    }
+    assert parse_current_status(payload).measurements.power is None
 
 
 def test_temperature_always_celsius_ignoring_units_field(status_1_01):
@@ -102,11 +123,38 @@ def test_input_state_nonzero_integer_is_reported():
     assert parse_current_status(payload).input_state == "4"
 
 
-def test_pascalcase_and_lowercase_connected_both_read():
-    """Firmware 1.01 uses PascalCase where the docs use lowercase."""
+def test_input_state_multi_element_array_joins_with_comma():
+    payload = {
+        "model": "X", "MAC": ["AA:BB:CC:00:11:22"],
+        "devices": [{
+            "id": "/1",
+            "deviceMeasurements": {"inputState": ["No Ground", "Over Voltage"]},
+            "outlets": [],
+        }],
+    }
+    assert parse_current_status(payload).input_state == "No Ground, Over Voltage"
+
+
+def test_input_state_empty_array_is_ok():
+    payload = {
+        "model": "X", "MAC": ["AA:BB:CC:00:11:22"],
+        "devices": [{"id": "/1", "deviceMeasurements": {"inputState": []}, "outlets": []}],
+    }
+    assert parse_current_status(payload).input_state == "OK"
+
+
+def test_wiring_fault_reads_lowercase_key_and_is_none_when_absent():
+    """wiringFault is a plain lowercase-first key in both firmware generations."""
     base = {"model": "X", "MAC": ["AA:BB:CC:00:11:22"]}
-    pascal = {**base, "devices": [{"id": "/1", "wiringFault": True, "deviceMeasurements": {}, "outlets": []}]}
-    assert parse_current_status(pascal).wiring_fault is True
+
+    true_payload = {**base, "devices": [{"id": "/1", "wiringFault": True, "deviceMeasurements": {}, "outlets": []}]}
+    assert parse_current_status(true_payload).wiring_fault is True
+
+    false_payload = {**base, "devices": [{"id": "/1", "wiringFault": False, "deviceMeasurements": {}, "outlets": []}]}
+    assert parse_current_status(false_payload).wiring_fault is False
+
+    absent_payload = {**base, "devices": [{"id": "/1", "deviceMeasurements": {}, "outlets": []}]}
+    assert parse_current_status(absent_payload).wiring_fault is None
 
 
 def test_missing_mac_raises():
