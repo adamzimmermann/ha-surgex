@@ -8,3 +8,7 @@ __pycache__/
 htmlcov/
 .DS_Store
 .superpowers/
+
+# Local development helper: overwrites the HACS-managed install, so it is
+# deliberately not published.
+scripts/deploy.sh

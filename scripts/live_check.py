@@ -5,9 +5,12 @@ This is the check that mocked unit tests cannot do: it talks to an actual
 SurgeX Squid PDU and confirms identity, parsing, control, and two
 documentation ambiguities the design spec flagged.
 
+It toggles a real outlet and briefly changes a device setting, restoring both.
+Do not run it against hardware powering anything you care about.
+
 Usage:
     set -a; . ./.secrets.env; set +a
-    .venv/bin/python scripts/live_check.py 192.168.1.131
+    .venv/bin/python scripts/live_check.py <device-host-or-ip>
 """
 
 from __future__ import annotations
@@ -248,4 +251,11 @@ async def main(host: str) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main(sys.argv[1] if len(sys.argv) > 1 else "192.168.1.131")))
+    host = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("SURGEX_HOST")
+    if not host:
+        print(
+            "Usage: live_check.py <device-host-or-ip>   (or set SURGEX_HOST)",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    sys.exit(asyncio.run(main(host)))
