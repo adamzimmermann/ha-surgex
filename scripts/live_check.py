@@ -99,38 +99,60 @@ async def check_temperature_units(
     original_units = settings.get("temperatureUnits")
     print(f"  deviceSettings.temperatureUnits (before): {original_units!r}")
 
+    # Flip to whichever value the device is *not* already on. Writing 'C' to a
+    # device already set to 'C' compares the payload with itself, which reads
+    # as "unchanged" and looks like proof while proving nothing.
+    known_units = str(original_units).upper() if original_units else None
+    probe_units = {"C": "F", "F": "C"}.get(known_units)
+
     status_before = await get_json(session, base_url, auth, "currentStatus")
     temp_before = status_before["devices"][0]["deviceMeasurements"]["temperature"]
     print(f"  currentStatus temperature (units={original_units!r}): {temp_before}")
 
+    if probe_units is None:
+        print(
+            f"  VERDICT: inconclusive -- temperatureUnits reads "
+            f"{original_units!r}, so there is no opposite value to flip to. "
+            f"Device left untouched."
+        )
+        return
+
     try:
         await put_json(
-            session, base_url, auth, "deviceSettings", {"temperatureUnits": "C"}
+            session, base_url, auth, "deviceSettings", {"temperatureUnits": probe_units}
         )
         status_after = await get_json(session, base_url, auth, "currentStatus")
         temp_after = status_after["devices"][0]["deviceMeasurements"]["temperature"]
-        print(f"  currentStatus temperature (units='C'): {temp_after}")
+        print(f"  currentStatus temperature (units={probe_units!r}): {temp_after}")
 
         if temp_before == temp_after:
             print(
-                "  VERDICT: value unchanged -- payload is Celsius regardless of "
-                "temperatureUnits. models.py is already correct."
+                f"  VERDICT: value unchanged across {known_units} -> "
+                f"{probe_units} -- the payload is Celsius regardless of "
+                f"temperatureUnits. models.py is already correct."
             )
         else:
             print(
-                "  VERDICT: value changed -- temperatureUnits is meaningful. "
-                "models.py needs to convert when units are 'F'."
+                f"  VERDICT: value changed across {known_units} -> "
+                f"{probe_units} -- temperatureUnits is meaningful. "
+                f"models.py needs to convert when units are 'F'."
             )
     finally:
         # Leaving the user's device in a changed state is not acceptable.
+        # Restore the units that were actually captured, not a hardcoded 'F':
+        # a device already set to Celsius must not come back Fahrenheit.
         # Restore unconditionally, even if the check above raised.
         await put_json(
-            session, base_url, auth, "deviceSettings", {"temperatureUnits": "F"}
+            session,
+            base_url,
+            auth,
+            "deviceSettings",
+            {"temperatureUnits": original_units},
         )
         restored = await get_json(session, base_url, auth, "deviceSettings")
         print(
             f"  deviceSettings.temperatureUnits (restored): "
-            f"{restored.get('temperatureUnits')!r}"
+            f"{restored.get('temperatureUnits')!r} (expected {original_units!r})"
         )
 
 

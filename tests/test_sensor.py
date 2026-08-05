@@ -1,6 +1,5 @@
 from unittest.mock import patch
 
-import pytest
 from homeassistant.components.sensor import ATTR_STATE_CLASS, SensorStateClass
 from homeassistant.const import (
     ATTR_DEVICE_CLASS,

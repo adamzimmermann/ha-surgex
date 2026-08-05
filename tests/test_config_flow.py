@@ -67,7 +67,7 @@ async def test_duplicate_device_aborts(hass, who_are_you, status_1_01):
     assert result["reason"] == "already_configured"
 
 
-async def test_non_squid_device_aborts(hass):
+async def test_non_squid_device_shows_not_a_squid_error(hass):
     """A WhoAreYou body without a MAC is not a Squid."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": SOURCE_USER})
     with patch(

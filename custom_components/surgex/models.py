@@ -132,19 +132,44 @@ def _parse_input_state(raw: Any) -> str | None:
     return None
 
 
-def _parse_outlet(raw: dict[str, Any]) -> SquidOutlet:
+def _as_int(value: Any, field: str, outlet_id: str) -> int:
+    """Coerce a numeric outlet field, reporting failure as a parse error.
+
+    A bare int() raises ValueError or TypeError, neither of which the
+    coordinator recognises as a parse failure -- so one malformed outlet would
+    produce a full traceback on every poll instead of a single logged message.
+    """
+    if value is None or value == "":  # absent, null, or blank
+        return 0
+    if isinstance(value, (int, float)):  # bool included: True reads as 1
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError as err:
+            raise SurgexParseError(
+                f"Outlet {outlet_id} has a non-numeric {field}: {value!r}"
+            ) from err
+    raise SurgexParseError(
+        f"Outlet {outlet_id} has a non-numeric {field}: {value!r}"
+    )
+
+
+def _parse_outlet(raw: Any) -> SquidOutlet:
+    if not isinstance(raw, dict):
+        raise SurgexParseError(f"Outlet entry is not an object: {raw!r}")
     outlet_id = raw.get("id")
-    if not outlet_id:
+    if not outlet_id or not isinstance(outlet_id, str):
         raise SurgexParseError("Outlet is missing an id")
     physical = raw.get("physicalName") or outlet_id
     return SquidOutlet(
         id=outlet_id,
         name=raw.get("name") or physical,
         physical_name=physical,
-        state=int(raw.get("state") or 0),
+        state=_as_int(raw.get("state"), "state", outlet_id),
         voltage_type=raw.get("outputVoltageType") or "AC",
         config_voltage=_as_float(raw.get("configVoltage")),
-        reboot_time=int(raw.get("rebootTime") or 0),
+        reboot_time=_as_int(raw.get("rebootTime"), "rebootTime", outlet_id),
         hidden=bool(raw.get("isHidden", False)),
     )
 
@@ -176,11 +201,19 @@ def parse_current_status(payload: dict[str, Any]) -> SquidStatus:
         raise SurgexParseError("Payload has no MAC address")
 
     devices = payload.get("devices") or []
-    if not devices:
+    if not devices or not isinstance(devices, list):
         raise SurgexParseError("Payload contains no devices")
     device = devices[0]
+    if not isinstance(device, dict):
+        raise SurgexParseError(f"Device entry is not an object: {device!r}")
 
-    measurements_raw = device.get("deviceMeasurements") or {}
+    measurements_raw = device.get("deviceMeasurements")
+    if not isinstance(measurements_raw, dict):
+        measurements_raw = {}
+
+    outlets_raw = device.get("outlets") or []
+    if not isinstance(outlets_raw, list):
+        raise SurgexParseError(f"Device outlets is not a list: {outlets_raw!r}")
 
     # inputState lives on the device in 1.01 and in deviceMeasurements in 0.5.x.
     raw_input_state = device.get("inputState")
@@ -197,7 +230,7 @@ def parse_current_status(payload: dict[str, Any]) -> SquidStatus:
         mac=macs[0],
         firmware=payload.get("firmware") or None,
         hostname=payload.get("hostname") or None,
-        outlets=tuple(_parse_outlet(o) for o in device.get("outlets") or []),
+        outlets=tuple(_parse_outlet(o) for o in outlets_raw),
         measurements=_parse_measurements(measurements_raw),
         input_state=_parse_input_state(raw_input_state),
         wiring_fault=wiring_fault if isinstance(wiring_fault, bool) else None,

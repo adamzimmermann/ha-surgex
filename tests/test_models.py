@@ -165,3 +165,42 @@ def test_missing_mac_raises():
 def test_missing_devices_raises():
     with pytest.raises(SurgexParseError):
         parse_current_status({"model": "X", "MAC": ["AA:BB:CC:00:11:22"]})
+
+
+def _payload_with_outlets(outlets):
+    return {
+        "model": "X",
+        "MAC": ["AA:BB:CC:00:11:22"],
+        "devices": [{"id": "/1", "deviceMeasurements": {}, "outlets": outlets}],
+    }
+
+
+@pytest.mark.parametrize(
+    ("outlet", "why"),
+    [
+        ({"id": "/1/1", "state": "on"}, "non-numeric state"),
+        ({"id": "/1/1", "state": {}}, "state is an object"),
+        ({"id": "/1/1", "state": 1, "rebootTime": "soon"}, "non-numeric rebootTime"),
+        ("/1/1", "outlet entry is a bare string"),
+        (["/1/1"], "outlet entry is a list"),
+        (None, "outlet entry is null"),
+    ],
+)
+def test_malformed_outlet_raises_parse_error(outlet, why):
+    """Malformed outlets must raise SurgexParseError, not ValueError/AttributeError.
+
+    Anything else bypasses the coordinator's log-once path and produces a full
+    traceback on every single poll.
+    """
+    with pytest.raises(SurgexParseError):
+        parse_current_status(_payload_with_outlets([outlet]))
+
+
+def test_outlet_state_accepts_a_numeric_string():
+    """Firmware that quotes its numbers is understood, not rejected."""
+    status = parse_current_status(
+        _payload_with_outlets([{"id": "/1/1", "state": "1", "rebootTime": "5"}])
+    )
+    outlet = status.outlets[0]
+    assert outlet.is_on is True
+    assert outlet.reboot_time == 5
