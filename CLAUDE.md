@@ -12,7 +12,7 @@ own `/api/v1` REST API. Developed against an `SX-DC-8-12-120` on firmware
 ## Commands
 
 ```bash
-.venv/bin/python -m pytest              # full suite (112 tests, ~5s)
+.venv/bin/python -m pytest              # full suite (121 tests, ~5s)
 .venv/bin/python -m pytest tests/test_api.py::test_who_are_you_returns_payload
 .venv/bin/python -m pytest -k config_flow
 pip install -r requirements-test.txt    # pytest-homeassistant-custom-component pins the HA version
@@ -21,17 +21,42 @@ pip install -r requirements-test.txt    # pytest-homeassistant-custom-component 
 `.venv` is a symlink to `~/.venvs/ha-surgex`. `pytest.ini` sets `asyncio_mode = auto`,
 so async tests need no decorator.
 
-Live hardware check (toggles a real outlet and briefly writes a device setting,
-restoring both — do not point it at hardware powering anything that matters):
+Live hardware check. It powers one outlet off and back on, restoring what it
+found; it writes no device settings, and the energy-reset check skips itself
+unless the counter already reads 0. **Confirm with the device owner before
+running it** — only they know whether the PDU is powering something that
+matters right now.
 
 ```bash
-set -a; . ./.secrets.env; set +a
-.venv/bin/python scripts/live_check.py <host-or-ip>
+set -a; . ./.secrets.env; set +a          # SURGEX_USER, SURGEX_PASS, SURGEX_HOST
+.venv/bin/python scripts/live_check.py [host-or-ip]
 ```
 
+Keep that script to checks that stay useful. One-off investigations that have
+been answered belong in a comment, not in code that re-runs forever — the two
+that used to live there both wrote to the device, and one of them wedged it
+(see the hardware note below).
+
 CI (`.github/workflows/validate.yml`) runs hassfest, HACS validation, and pytest on
-Python 3.14. Hassfest needs Docker and cannot run locally; `tests/test_manifest.py`
-mirrors its structural checks so they run every time.
+Python 3.14, on pushes to `main`, pull requests, and `v*` tags. Hassfest needs
+Docker and cannot run locally; `tests/test_manifest.py` mirrors its structural
+checks so they run every time.
+
+## Releasing
+
+**The git tag must be `v` + the `version` in `manifest.json`, exactly.** Bump the
+manifest and commit it *before* tagging. HACS and Home Assistant's device registry
+both read that field, so a tag that disagrees ships an integration misreporting
+its own version — which is what happened to `v0.1.1` (tagged while the manifest
+still said `0.1.0`).
+
+The `Manifest version matches tag` CI job fails the run when they disagree, but
+it is detective, not preventive: it runs after the tag exists, because nothing
+earlier knows the tag name. Recovery is to bump the manifest, delete both the tag
+and the release, and tag again.
+
+`test_manifest.py` cannot catch this — it only asserts the version is a non-empty
+string, which a stale value satisfies perfectly.
 
 ## Architecture
 
@@ -66,7 +91,19 @@ Each of these has a comment at the site. Read it before "simplifying" any of the
   `REQUEST_REFRESH_COOLDOWN` of 3s; switches hold an optimistic state until that
   poll lands. Making the debouncer immediate reintroduces the stale-readback bug.
 - **Temperature.** Reported in Celsius no matter what `temperatureUnits` says (this
-  firmware says `"F"`). Verified on hardware by `scripts/live_check.py`.
+  firmware says `"F"`). Confirmed twice on hardware by flipping the setting and
+  watching the payload not move. That check has been removed — it was the only code
+  that wrote a device setting, and its `finally`-block restore assumed the restore
+  could not itself fail. Do not reintroduce it to re-answer a settled question.
+- **The HTTP server is fragile.** It is small and single-threaded, and a request
+  that hangs rather than failing ties up a connection slot. Two runs of a probe
+  that hung (the unscoped `/ResetEnergyUsage`) exhausted the pool and the device
+  answered `503 Server Busy` to *everything*, including Home Assistant's polling,
+  for eight minutes before recovering on its own. Treat back-to-back scripted
+  requests against real hardware with care, and never add a probe whose failure
+  mode is a hang.
+- **`ResetEnergyUsage` is device-scoped** (`{device_path}/ResetEnergyUsage`). The
+  unscoped path does not fail cleanly — it hangs, per the note above.
 - **`inputState`** lives on the device object in 1.01 and inside
   `deviceMeasurements` in the 0.5.x docs; `models.py` accepts int, list, and string
   forms.
@@ -86,6 +123,13 @@ Fixtures in `tests/fixtures/` cover both firmware shapes: `current_status_1_01.j
 (captured live) and `current_status_0_5_documented.json` (from AMETEK's docs).
 Parsing changes should be checked against both.
 
+`test_live_check.py` loads `scripts/live_check.py` by path and covers its two
+consequential guards: the one that refuses to reset an energy counter with data on
+it, and the one asserting a bad password stays distinguishable from an unreachable
+device. Both are cases where a silently broken check is worse than no check —
+verify changes to them by mutation (break the guard, confirm exactly one test
+fails), not by watching them pass.
+
 ## Conventions
 
 - `strings.json` and `translations/en.json` must stay byte-identical —
@@ -95,4 +139,5 @@ Parsing changes should be checked against both.
 - Diagnostics deliberately omit the MAC. Do not add it back.
 - `scripts/deploy.sh` is gitignored as a guard: copying this directly into a HA
   config dir would overwrite a HACS-managed install. Installation goes through HACS.
-- Bump `version` in `manifest.json` for releases.
+- See **Releasing** above before tagging: the manifest version and the tag must
+  match, and the manifest bump comes first.
