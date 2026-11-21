@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # The workflow pins every action to a commit SHA, so a compromised or
+  # force-moved tag upstream cannot change what CI runs. The cost of pinning is
+  # that nothing moves on its own; this keeps the pins current via reviewable PRs.
+  #
+  # pip is deliberately not listed. requirements-test-min.txt must stay pinned
+  # to the HA floor in hacs.json, and Dependabot would "helpfully" bump it.
+  # requirements-test.txt is bumped by hand alongside a test run.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
